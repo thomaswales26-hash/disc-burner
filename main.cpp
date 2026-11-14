@@ -78,9 +78,17 @@ fs::path bundledTool(const std::string& name)
         const fs::path executable = fs::canonical(executablePath.data(), error);
         if (!error)
         {
-            const fs::path bundled = executable.parent_path().parent_path() / "libexec" / "disc-burner" / name;
-            if (access(bundled.c_str(), X_OK) == 0)
-                return bundled;
+            const fs::path contents = executable.parent_path().parent_path();
+            const std::vector<fs::path> locations = {
+                contents / "Resources" / "libexec" / "disc-burner" / name,
+                contents / "libexec" / "disc-burner" / name,
+                contents.parent_path() / "libexec" / "disc-burner" / name
+            };
+            for (const auto& bundled : locations)
+            {
+                if (access(bundled.c_str(), X_OK) == 0)
+                    return bundled;
+            }
         }
     }
 #endif

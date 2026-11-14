@@ -1,5 +1,6 @@
 /build/
 /build-package/
+/build-gui/
 /cmake-build-*/
 /package-root/
 /dist/

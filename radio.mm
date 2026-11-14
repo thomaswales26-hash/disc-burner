@@ -345,7 +345,10 @@ NSStackView* stack(NSArray<NSView*>* views, NSUserInterfaceLayoutOrientation ori
     _recordingTask.executableURL = [NSURL fileURLWithPath:
         [NSString stringWithUTF8String:ffmpeg.c_str()]];
     _recordingTask.arguments = @[
-        @"-nostdin", @"-hide_banner", @"-loglevel", @"warning", @"-i", url.absoluteString,
+        @"-nostdin", @"-hide_banner", @"-loglevel", @"info", @"-stats_period", @"2",
+        @"-progress", @"pipe:2", @"-reconnect", @"1", @"-reconnect_streamed", @"1",
+        @"-reconnect_at_eof", @"1", @"-reconnect_on_network_error", @"1",
+        @"-reconnect_delay_max", @"10", @"-i", url.absoluteString,
         @"-vn", @"-c:a", @"aac", @"-b:a", @"192k", @"-f", @"ipod", @"-n",
         [NSString stringWithUTF8String:output.string().c_str()]
     ];

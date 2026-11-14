@@ -4,7 +4,9 @@
 #include <cerrno>
 #include <cstdlib>
 #include <filesystem>
+#include <sstream>
 #include <string>
+#include <string_view>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
@@ -67,6 +69,12 @@ struct CommandResult
     std::string output;
 };
 
+struct DriveDevice
+{
+    std::string identifier;
+    std::string description;
+};
+
 CommandResult execute(const std::vector<std::string>& arguments)
 {
     if (arguments.empty())
@@ -102,6 +110,44 @@ CommandResult execute(const std::vector<std::string>& arguments)
         std::string text = output.UTF8String ? output.UTF8String : "(command output was not UTF-8)\n";
         return {task.terminationStatus, std::move(text)};
     }
+}
+
+std::vector<DriveDevice> discoverCdrdaoDrives(std::string& diagnostic)
+{
+    const std::string cdrdao = resolveTool("cdrdao");
+    if (cdrdao.empty())
+    {
+        diagnostic = "cdrdao is unavailable.";
+        return {};
+    }
+
+    const CommandResult result = execute({cdrdao, "scanbus"});
+    diagnostic = result.output;
+    std::vector<DriveDevice> drives;
+    std::istringstream lines(result.output);
+    std::string line;
+    while (std::getline(lines, line))
+    {
+        const auto marker = line.find(" : ");
+        if (marker == std::string::npos)
+            continue;
+
+        DriveDevice drive{line.substr(0, marker), line.substr(marker + 3)};
+        if (drive.identifier.starts_with("IOService:") && !drive.description.empty())
+            drives.push_back(std::move(drive));
+    }
+    if (result.status != 0 && diagnostic.empty())
+        diagnostic = "cdrdao scanbus failed.\n";
+    return drives;
+}
+
+NSString* driveDiscoveryFailure(std::string_view reason, const std::string& scanOutput)
+{
+    const CommandResult macOSDrives = execute({"/usr/bin/drutil", "list"});
+    return [NSString stringWithFormat:
+        @"%s\n\nmacOS optical drives:\n%s\ncdrdao scanbus:\n%s\n"
+         "If media is inserted, eject it and scan again; a mounted disc can prevent cdrdao from accessing the drive.",
+        std::string(reason).c_str(), macOSDrives.output.c_str(), scanOutput.c_str()];
 }
 
 NSButton* makeButton(NSString* title, id target, SEL action)
@@ -363,6 +409,12 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
         NSMutableString* output = [NSMutableString string];
         for (const auto& command : commands)
         {
+            [output appendFormat:@">"];
+            for (const auto& argument : command)
+            {
+                [output appendFormat:@" %s", argument.c_str()];
+            }
+            [output appendString:@"\n"];
             const CommandResult result = execute(command);
             if (!result.output.empty())
                 [output appendString:[NSString stringWithUTF8String:result.output.c_str()]];
@@ -475,15 +527,29 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
     if (cue.empty())
         return;
 
+    std::string scanOutput;
+    const std::vector<DriveDevice> drives = discoverCdrdaoDrives(scanOutput);
+    if (drives.empty())
+    {
+        [self showMessage:driveDiscoveryFailure("No CUE recorder device path was returned.", scanOutput)];
+        return;
+    }
+
     NSAlert* deviceAlert = [[NSAlert alloc] init];
     deviceAlert.messageText = @"Select the CD recorder";
-    deviceAlert.informativeText = @"Enter the device identifier reported by Scan CUE Recorder (for example, 1,0,0).";
-    NSTextField* deviceField = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 240, 24)];
-    deviceField.placeholderString = @"1,0,0";
-    deviceAlert.accessoryView = deviceField;
+    deviceAlert.informativeText = @"Select a device detected by cdrdao.";
+    NSPopUpButton* devicePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 0, 320, 28)];
+    for (const auto& drive : drives)
+    {
+        NSMenuItem* item = [[NSMenuItem alloc] initWithTitle:
+            [NSString stringWithUTF8String:drive.description.c_str()] action:nil keyEquivalent:@""];
+        item.representedObject = [NSString stringWithUTF8String:drive.identifier.c_str()];
+        [devicePopup.menu addItem:item];
+    }
+    deviceAlert.accessoryView = devicePopup;
     [deviceAlert addButtonWithTitle:@"Continue"];
     [deviceAlert addButtonWithTitle:@"Cancel"];
-    if ([deviceAlert runModal] != NSAlertFirstButtonReturn || deviceField.stringValue.length == 0)
+    if ([deviceAlert runModal] != NSAlertFirstButtonReturn || devicePopup.selectedItem == nil)
         return;
     if (![self confirmBurn:@"Burn an audio CD from this CUE sheet?"])
         return;
@@ -500,7 +566,7 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
     close(file);
 
     const fs::path toc(tempName.data());
-    const std::string device = deviceField.stringValue.UTF8String;
+    const std::string device = [(NSString*)devicePopup.selectedItem.representedObject UTF8String];
     [self runCommands:{{cue2toc, "-o", toc.string(), cue.string()},
                        {cdrdao, "write", "--device", device, "--driver", "generic-mmc", "--eject", toc.string()}}
                success:@"Audio CD burned."
@@ -517,20 +583,45 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
         return;
     }
 
+    std::string scanOutput;
+    const std::vector<DriveDevice> drives = discoverCdrdaoDrives(scanOutput);
+    if (drives.size() < 2)
+    {
+        NSString* message = drives.empty()
+            ? driveDiscoveryFailure("No CUE-compatible device paths were returned.", scanOutput)
+            : [NSString stringWithFormat:
+                @"Only one CUE-compatible drive was found:\n\n%s\n\n"
+                 "Copying requires two separate drives: one for the original CD and one for the blank disc.",
+                 drives.front().description.c_str()];
+        [self showMessage:message];
+        return;
+    }
+
     NSAlert* deviceAlert = [[NSAlert alloc] init];
     deviceAlert.messageText = @"Copy an audio or data CD";
     deviceAlert.informativeText =
         @"Insert the original CD in a reader and a blank CD-R/RW in a separate recorder. "
          "This feature copies CDs; it does not copy DVDs or Blu-rays.";
-    NSTextField* sourceField = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 240, 24)];
-    sourceField.placeholderString = @"Source drive (for example 1,0,0)";
-    NSTextField* writerField = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 240, 24)];
-    writerField.placeholderString = @"Recorder drive (for example 2,0,0)";
+    NSPopUpButton* sourcePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 0, 360, 28)];
+    NSPopUpButton* writerPopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 0, 360, 28)];
+    for (const auto& drive : drives)
+    {
+        NSString* title = [NSString stringWithUTF8String:drive.description.c_str()];
+        NSString* identifier = [NSString stringWithUTF8String:drive.identifier.c_str()];
+        NSMenuItem* sourceItem = [[NSMenuItem alloc] initWithTitle:title action:nil keyEquivalent:@""];
+        sourceItem.representedObject = identifier;
+        [sourcePopup.menu addItem:sourceItem];
+        NSMenuItem* writerItem = [[NSMenuItem alloc] initWithTitle:title action:nil keyEquivalent:@""];
+        writerItem.representedObject = identifier;
+        [writerPopup.menu addItem:writerItem];
+    }
+    if (drives.size() > 1)
+        [writerPopup selectItemAtIndex:1];
     NSStackView* fields = verticalStack(@[
         [NSTextField labelWithString:@"Original disc drive"],
-        sourceField,
+        sourcePopup,
         [NSTextField labelWithString:@"Blank disc recorder"],
-        writerField
+        writerPopup
     ], 6);
     deviceAlert.accessoryView = fields;
     [deviceAlert addButtonWithTitle:@"Continue"];
@@ -538,13 +629,13 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
     if ([deviceAlert runModal] != NSAlertFirstButtonReturn)
         return;
 
-    const std::string source = sourceField.stringValue.UTF8String ?: "";
-    const std::string writer = writerField.stringValue.UTF8String ?: "";
-    if (source.empty() || writer.empty())
+    if (sourcePopup.selectedItem == nil || writerPopup.selectedItem == nil)
     {
-        [self showMessage:@"Enter both the source CD drive and the blank-disc recorder."];
+        [self showMessage:@"Select both the source CD drive and the blank-disc recorder."];
         return;
     }
+    const std::string source = [(NSString*)sourcePopup.selectedItem.representedObject UTF8String];
+    const std::string writer = [(NSString*)writerPopup.selectedItem.representedObject UTF8String];
     if (source == writer)
     {
         [self showMessage:@"Disc copy requires separate source and recorder drives."];
@@ -562,7 +653,9 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
 - (void)listDrives:(id)sender
 {
     (void)sender;
-    [self runCommands:{{"/usr/bin/drutil", "list"}} success:@"Drive list complete." cleanupPath:""];
+    [self runCommands:{{"/usr/bin/drutil", "list"}}
+               success:@"macOS drive listing complete. SupportLevel: Unsupported does not mean the drive was not detected."
+          cleanupPath:""];
 }
 
 - (void)showDriveStatus:(id)sender

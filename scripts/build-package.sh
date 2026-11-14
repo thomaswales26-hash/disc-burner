@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="${1:-1.3.0}"
+VERSION="${1:-1.3.1}"
 STAGE="$ROOT/package-root"
 PACKAGE="$ROOT/dist/Disc-Burner-$VERSION.pkg"
 PREFIX="$(brew --prefix)"

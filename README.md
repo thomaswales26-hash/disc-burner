@@ -36,6 +36,11 @@ the bundled `cdrdao`. The package includes upstream source archives and license
 information for the bundled open-source components under
 `/usr/local/share/doc/disc-burner/`.
 
+The drive listing shows both macOS `drutil` information and `cdrdao` device
+paths. A `SupportLevel: Unsupported` line from `drutil` does not mean the drive
+was not detected; use the corresponding `IOService:` path reported by
+`cdrdao scanbus` for CUE burning and CD copying.
+
 Use **Copy CD…** to duplicate an audio or data CD directly from a source drive
 to a separate recorder with a blank CD-R/RW. The original and destination
 drives must be different; use **Scan CUE Recorder** to find `cdrdao` device

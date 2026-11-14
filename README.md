@@ -2,7 +2,7 @@
 
 A macOS application for mastering and burning data Blu-ray, DVD, and CD discs,
 creating compressed DMG files from folders, burning existing disc images, and
-writing audio CDs from CUE sheets.
+copying CDs between drives.
 
 ## Build and run
 
@@ -18,32 +18,27 @@ The build also includes the command-line version at `build/disc-burner`.
 
 The app uses macOS `hdiutil` to create and burn disc images and `drutil` for
 drive listing, status, and eject controls. Choose **Create a compressed DMG**
-to package a folder as a read-only, compressed `.dmg` file. For CUE burning in
-a local CMake build, install `cdrdao` (which provides `cue2toc`) with Homebrew:
+to package a folder as a read-only, compressed `.dmg` file. CD copying and
+device scanning use `cdrdao`; install it for local builds with Homebrew:
 
 ```sh
 brew install cdrdao
 ```
 
-The installer package includes `cdrdao`, `cue2toc`, and their runtime
-libraries, so CUE burning does not require Homebrew. A CMake build can also
-find `cdrdao` and `cue2toc` on `PATH` as a development fallback. In the CUE
-workflow, enter the device identifier in the format accepted by `cdrdao`
-(see `cdrdao scanbus`). CUE sheets and their referenced audio files must be
-accessible; the converter and recorder determine which audio formats are
-supported. In the GUI, use **Scan CUE Recorder** to find recorder devices with
-the bundled `cdrdao`. The package includes upstream source archives and license
-information for the bundled open-source components under
+The installer package includes `cdrdao` and its runtime libraries. A CMake
+build can also find `cdrdao` on `PATH` as a development fallback. Use **Scan CD
+Recorder** to find recorder devices. The package includes upstream source
+archives and license information for bundled open-source components under
 `/usr/local/share/doc/disc-burner/`.
 
 The drive listing shows both macOS `drutil` information and `cdrdao` device
 paths. A `SupportLevel: Unsupported` line from `drutil` does not mean the drive
 was not detected; use the corresponding `IOService:` path reported by
-`cdrdao scanbus` for CUE burning and CD copying.
+`cdrdao scanbus` for CD copying.
 
 Use **Copy CD…** to duplicate an audio or data CD directly from a source drive
 to a separate recorder with a blank CD-R/RW. The original and destination
-drives must be different; use **Scan CUE Recorder** to find `cdrdao` device
+drives must be different; use **Scan CD Recorder** to find `cdrdao` device
 identifiers. DVD and Blu-ray disc copying are not supported by this feature.
 
 Burning requires a compatible external or internal recorder and blank media.
@@ -61,5 +56,5 @@ bash scripts/build-package.sh
 ```
 
 The installer, including `Disc Burner.app`, is written to `dist/`. The app and
-bundled CUE tools are built for Apple Silicon; macOS system disc utilities are
-used for other disc operations.
+bundled recorder tool are built for Apple Silicon; macOS system disc utilities
+are used for other disc operations.

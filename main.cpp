@@ -95,11 +95,6 @@ fs::path bundledTool(const std::string& name)
     return {};
 }
 
-bool toolAvailable(const std::string& name)
-{
-    return !bundledTool(name).empty() || available(name);
-}
-
 std::string toolCommand(const std::string& name)
 {
     const fs::path bundled = bundledTool(name);
@@ -211,74 +206,16 @@ void createDmg()
     std::cout << "DMG created at " << output << '\n';
 }
 
-void burnCue()
-{
-    if (!toolAvailable("cue2toc") || !toolAvailable("cdrdao"))
-    {
-        std::cerr << "The bundled CUE-burning tools are unavailable. Reinstall the app or add "
-                     "cdrdao and cue2toc to PATH.\n";
-        return;
-    }
-
-    const fs::path cue = prompt("CUE file path: ");
-    if (!fs::is_regular_file(cue))
-    {
-        std::cerr << "CUE file not found: " << cue << '\n';
-        return;
-    }
-    const std::string device = prompt("CD recorder device (as accepted by cdrdao): ");
-    if (device.empty())
-    {
-        std::cerr << "A recorder device is required.\n";
-        return;
-    }
-
-    std::string tempTemplate = (cue.parent_path() / ".disc-burner-XXXXXX.toc").string();
-    std::vector<char> tempName(tempTemplate.begin(), tempTemplate.end());
-    tempName.push_back('\0');
-    const int tempFile = mkstemps(tempName.data(), 4);
-    if (tempFile == -1)
-    {
-        std::cerr << "Could not create a temporary TOC beside the CUE file: " << strerror(errno) << '\n';
-        return;
-    }
-    close(tempFile);
-
-    const fs::path toc = tempName.data();
-    const int convertStatus = run({toolCommand("cue2toc"), "-o", toc.string(), cue.string()});
-    if (convertStatus != 0 || !fs::is_regular_file(toc))
-    {
-        fs::remove(toc);
-        std::cerr << "Could not convert the CUE file. Check its referenced audio files and format.\n";
-        return;
-    }
-
-    std::cout << "\nThe CUE sheet will be written as an audio CD.\n";
-    if (!confirmBurn())
-    {
-        fs::remove(toc);
-        std::cout << "Burn cancelled.\n";
-        return;
-    }
-
-    const int burnStatus = run({toolCommand("cdrdao"), "write", "--device", device, "--driver", "generic-mmc",
-                                "--eject", toc.string()});
-    fs::remove(toc);
-    if (burnStatus != 0)
-        std::cerr << "CUE disc burning failed. Check the drive, media, and cdrdao device value.\n";
-}
-
 void showMenu()
 {
     std::cout << "\n=== Disc Burner ===\n"
               << "1) Create and burn a Blu-ray, DVD, or data CD\n"
               << "2) Burn an existing disc image\n"
-              << "3) Import a CUE sheet and burn an audio CD\n"
-              << "4) Create a compressed DMG from a folder\n"
-              << "5) List optical drives\n"
-              << "6) Show drive/media status\n"
-              << "7) Eject disc\n"
-              << "8) Scan for CUE-burning recorder devices\n"
+              << "3) Create a compressed DMG from a folder\n"
+              << "4) List optical drives\n"
+              << "5) Show drive/media status\n"
+              << "6) Eject disc\n"
+              << "7) Scan CD recorder devices\n"
               << "0) Quit\n";
 }
 
@@ -295,7 +232,7 @@ int main()
         return 1;
     }
 
-    std::cout << "Disc Burner — data discs and CUE-based audio CDs\n"
+    std::cout << "Disc Burner — data discs and CD copying\n"
               << "Disc writing is irreversible; verify your drive and media before burning.\n";
     while (std::cin)
     {
@@ -308,19 +245,17 @@ int main()
         else if (choice == "2")
             burnImage(prompt("Disc image path (ISO/DMG): "));
         else if (choice == "3")
-            burnCue();
-        else if (choice == "4")
             createDmg();
-        else if (choice == "5")
+        else if (choice == "4")
             run({"drutil", "list"});
-        else if (choice == "6")
+        else if (choice == "5")
         {
             run({"drutil", "info"});
             run({"drutil", "status"});
         }
-        else if (choice == "7")
+        else if (choice == "6")
             run({"drutil", "tray", "eject"});
-        else if (choice == "8")
+        else if (choice == "7")
             run({toolCommand("cdrdao"), "scanbus"});
         else if (!choice.empty())
             std::cout << "Unknown option.\n";

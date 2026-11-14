@@ -191,12 +191,11 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
 - (void)createDataDisc:(id)sender;
 - (void)createDmg:(id)sender;
 - (void)burnImage:(id)sender;
-- (void)burnCue:(id)sender;
 - (void)copyDisc:(id)sender;
 - (void)listDrives:(id)sender;
 - (void)showDriveStatus:(id)sender;
 - (void)ejectDisc:(id)sender;
-- (void)scanCdrdaoDevices:(id)sender;
+- (void)scanRecorderDevices:(id)sender;
 @end
 
 @implementation DiscBurnerAppDelegate
@@ -234,33 +233,32 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
     NSTextField* title = [NSTextField labelWithString:@"Disc Burner"];
     title.font = [NSFont systemFontOfSize:28 weight:NSFontWeightBold];
     NSTextField* subtitle = [NSTextField labelWithString:
-        @"Create disk images, burn optical media, or import a CUE sheet for an audio CD."];
+        @"Create disk images, burn optical media, or copy a CD between drives."];
     subtitle.textColor = NSColor.secondaryLabelColor;
 
     NSButton* dataButton = makeButton(@"Create & Burn Data Disc", self, @selector(createDataDisc:));
     NSButton* dmgButton = makeButton(@"Create Compressed DMG", self, @selector(createDmg:));
     NSButton* imageButton = makeButton(@"Burn Disc Image…", self, @selector(burnImage:));
-    NSButton* cueButton = makeButton(@"Burn Audio CD from CUE…", self, @selector(burnCue:));
     NSButton* copyButton = makeButton(@"Copy CD…", self, @selector(copyDisc:));
     _discType = [[NSPopUpButton alloc] init];
     [_discType addItemsWithTitles:@[@"Blu-ray", @"DVD", @"CD"]];
     _discType.toolTip = @"Data disc format";
     [dataButton setKeyEquivalent:@"\r"];
-    [_actionButtons addObjectsFromArray:@[dataButton, dmgButton, imageButton, cueButton, copyButton]];
+    [_actionButtons addObjectsFromArray:@[dataButton, dmgButton, imageButton, copyButton]];
 
     NSTextField* discTypeLabel = [NSTextField labelWithString:@"Format:"];
     NSStackView* imageActions = horizontalStack(@[discTypeLabel, _discType, dataButton, dmgButton, imageButton], 10);
-    NSStackView* cueActions = horizontalStack(@[cueButton, copyButton], 10);
+    NSStackView* copyActions = horizontalStack(@[copyButton], 10);
     NSStackView* mediaSection = verticalStack(@[
         [NSTextField labelWithString:@"Create and burn"],
         imageActions,
-        cueActions
+        copyActions
     ], 10);
 
     NSButton* listButton = makeButton(@"List Drives", self, @selector(listDrives:));
     NSButton* statusButton = makeButton(@"Drive & Media Status", self, @selector(showDriveStatus:));
     NSButton* ejectButton = makeButton(@"Eject Disc", self, @selector(ejectDisc:));
-    NSButton* scanButton = makeButton(@"Scan CUE Recorder", self, @selector(scanCdrdaoDevices:));
+    NSButton* scanButton = makeButton(@"Scan CD Recorder", self, @selector(scanRecorderDevices:));
     [_actionButtons addObjectsFromArray:@[listButton, statusButton, ejectButton, scanButton]];
     NSStackView* driveActions = horizontalStack(@[listButton, statusButton, ejectButton, scanButton], 10);
     NSTextField* driveHeading = [NSTextField labelWithString:@"Recorder"];
@@ -512,67 +510,6 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
           cleanupPath:""];
 }
 
-- (void)burnCue:(id)sender
-{
-    (void)sender;
-    const std::string cue2toc = resolveTool("cue2toc");
-    const std::string cdrdao = resolveTool("cdrdao");
-    if (cue2toc.empty() || cdrdao.empty())
-    {
-        [self showMessage:@"CUE burning tools are unavailable. Reinstall the app or add cdrdao and cue2toc to PATH."];
-        return;
-    }
-
-    const fs::path cue = [self chooseFileWithPrompt:@"Choose a CUE sheet"];
-    if (cue.empty())
-        return;
-
-    std::string scanOutput;
-    const std::vector<DriveDevice> drives = discoverCdrdaoDrives(scanOutput);
-    if (drives.empty())
-    {
-        [self showMessage:driveDiscoveryFailure("No CUE recorder device path was returned.", scanOutput)];
-        return;
-    }
-
-    NSAlert* deviceAlert = [[NSAlert alloc] init];
-    deviceAlert.messageText = @"Select the CD recorder";
-    deviceAlert.informativeText = @"Select a device detected by cdrdao.";
-    NSPopUpButton* devicePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 0, 320, 28)];
-    for (const auto& drive : drives)
-    {
-        NSMenuItem* item = [[NSMenuItem alloc] initWithTitle:
-            [NSString stringWithUTF8String:drive.description.c_str()] action:nil keyEquivalent:@""];
-        item.representedObject = [NSString stringWithUTF8String:drive.identifier.c_str()];
-        [devicePopup.menu addItem:item];
-    }
-    deviceAlert.accessoryView = devicePopup;
-    [deviceAlert addButtonWithTitle:@"Continue"];
-    [deviceAlert addButtonWithTitle:@"Cancel"];
-    if ([deviceAlert runModal] != NSAlertFirstButtonReturn || devicePopup.selectedItem == nil)
-        return;
-    if (![self confirmBurn:@"Burn an audio CD from this CUE sheet?"])
-        return;
-
-    std::string tempTemplate = (cue.parent_path() / ".disc-burner-XXXXXX.toc").string();
-    std::vector<char> tempName(tempTemplate.begin(), tempTemplate.end());
-    tempName.push_back('\0');
-    const int file = mkstemps(tempName.data(), 4);
-    if (file == -1)
-    {
-        [self showMessage:[NSString stringWithFormat:@"Could not create a temporary TOC: %s", strerror(errno)]];
-        return;
-    }
-    close(file);
-
-    const fs::path toc(tempName.data());
-    const std::string device = [(NSString*)devicePopup.selectedItem.representedObject UTF8String];
-    [self runCommands:{{cue2toc, "-o", toc.string(), cue.string()},
-                       {cdrdao, "write", "--device", device, "--driver", "generic-mmc", "--eject", toc.string()}}
-               success:@"Audio CD burned."
-          cleanupPath:toc.string()];
-}
-
 - (void)copyDisc:(id)sender
 {
     (void)sender;
@@ -588,9 +525,9 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
     if (drives.size() < 2)
     {
         NSString* message = drives.empty()
-            ? driveDiscoveryFailure("No CUE-compatible device paths were returned.", scanOutput)
+            ? driveDiscoveryFailure("No compatible device paths were returned.", scanOutput)
             : [NSString stringWithFormat:
-                @"Only one CUE-compatible drive was found:\n\n%s\n\n"
+                @"Only one CD recorder was found:\n\n%s\n\n"
                  "Copying requires two separate drives: one for the original CD and one for the blank disc.",
                  drives.front().description.c_str()];
         [self showMessage:message];
@@ -672,7 +609,7 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
     [self runCommands:{{"/usr/bin/drutil", "tray", "eject"}} success:@"Eject command complete." cleanupPath:""];
 }
 
-- (void)scanCdrdaoDevices:(id)sender
+- (void)scanRecorderDevices:(id)sender
 {
     (void)sender;
     const std::string cdrdao = resolveTool("cdrdao");

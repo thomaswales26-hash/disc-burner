@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="${1:-1.3.1}"
+VERSION="${1:-1.4.0}"
 STAGE="$ROOT/package-root"
 PACKAGE="$ROOT/dist/Disc-Burner-$VERSION.pkg"
 PREFIX="$(brew --prefix)"
@@ -12,7 +12,7 @@ DOCS="$STAGE/usr/local/share/doc/disc-burner"
 SOURCES="$DOCS/third-party-source"
 APP="$STAGE/Applications/Disc Burner.app"
 
-for tool in cdrdao cue2toc; do
+for tool in cdrdao; do
     if [[ ! -x "$PREFIX/bin/$tool" ]]; then
         echo "Missing $tool. Install cdrdao with Homebrew before packaging." >&2
         exit 1
@@ -21,12 +21,13 @@ done
 
 mkdir -p "$STAGE/usr/local/bin" "$LIBEXEC" "$LIBRARIES" "$SOURCES" "$ROOT/dist"
 chmod -R u+w "$STAGE"
+rm -f "$LIBEXEC/cue2toc" "$APP/Contents/Resources/libexec/disc-burner/cue2toc"
 cmake -S "$ROOT" -B "$ROOT/build-package" -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
 cmake --build "$ROOT/build-package" --parallel 2
 cp "$ROOT/build-package/disc-burner" "$STAGE/usr/local/bin/disc-burner"
 mkdir -p "$STAGE/Applications"
 ditto "$ROOT/build-package/Disc Burner.app" "$APP"
-cp -L "$PREFIX/bin/cdrdao" "$PREFIX/bin/cue2toc" "$LIBEXEC/"
+cp -L "$PREFIX/bin/cdrdao" "$LIBEXEC/"
 cp "$ROOT/README.md" "$DOCS/README.md"
 python3 "$ROOT/scripts/relocate-cdrdao.py" "$LIBEXEC" "$LIBRARIES"
 mkdir -p "$APP/Contents/Resources/libexec"

@@ -18,7 +18,7 @@ def main():
     libexec = Path(sys.argv[1]).resolve()
     libraries = Path(sys.argv[2]).resolve()
     libraries.mkdir(parents=True, exist_ok=True)
-    tools = [libexec / "cdrdao", libexec / "cue2toc"]
+    tools = [libexec / "cdrdao"]
     queue = list(tools)
     bundled = {}
     source_by_name = {}

@@ -146,6 +146,7 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
 - (void)createDmg:(id)sender;
 - (void)burnImage:(id)sender;
 - (void)burnCue:(id)sender;
+- (void)copyDisc:(id)sender;
 - (void)listDrives:(id)sender;
 - (void)showDriveStatus:(id)sender;
 - (void)ejectDisc:(id)sender;
@@ -194,15 +195,16 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
     NSButton* dmgButton = makeButton(@"Create Compressed DMG", self, @selector(createDmg:));
     NSButton* imageButton = makeButton(@"Burn Disc Image…", self, @selector(burnImage:));
     NSButton* cueButton = makeButton(@"Burn Audio CD from CUE…", self, @selector(burnCue:));
+    NSButton* copyButton = makeButton(@"Copy CD…", self, @selector(copyDisc:));
     _discType = [[NSPopUpButton alloc] init];
     [_discType addItemsWithTitles:@[@"Blu-ray", @"DVD", @"CD"]];
     _discType.toolTip = @"Data disc format";
     [dataButton setKeyEquivalent:@"\r"];
-    [_actionButtons addObjectsFromArray:@[dataButton, dmgButton, imageButton, cueButton]];
+    [_actionButtons addObjectsFromArray:@[dataButton, dmgButton, imageButton, cueButton, copyButton]];
 
     NSTextField* discTypeLabel = [NSTextField labelWithString:@"Format:"];
     NSStackView* imageActions = horizontalStack(@[discTypeLabel, _discType, dataButton, dmgButton, imageButton], 10);
-    NSStackView* cueActions = horizontalStack(@[cueButton], 10);
+    NSStackView* cueActions = horizontalStack(@[cueButton, copyButton], 10);
     NSStackView* mediaSection = verticalStack(@[
         [NSTextField labelWithString:@"Create and burn"],
         imageActions,
@@ -503,6 +505,58 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
                        {cdrdao, "write", "--device", device, "--driver", "generic-mmc", "--eject", toc.string()}}
                success:@"Audio CD burned."
           cleanupPath:toc.string()];
+}
+
+- (void)copyDisc:(id)sender
+{
+    (void)sender;
+    const std::string cdrdao = resolveTool("cdrdao");
+    if (cdrdao.empty())
+    {
+        [self showMessage:@"cdrdao is unavailable. Reinstall the app or add it to PATH."];
+        return;
+    }
+
+    NSAlert* deviceAlert = [[NSAlert alloc] init];
+    deviceAlert.messageText = @"Copy an audio or data CD";
+    deviceAlert.informativeText =
+        @"Insert the original CD in a reader and a blank CD-R/RW in a separate recorder. "
+         "This feature copies CDs; it does not copy DVDs or Blu-rays.";
+    NSTextField* sourceField = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 240, 24)];
+    sourceField.placeholderString = @"Source drive (for example 1,0,0)";
+    NSTextField* writerField = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 240, 24)];
+    writerField.placeholderString = @"Recorder drive (for example 2,0,0)";
+    NSStackView* fields = verticalStack(@[
+        [NSTextField labelWithString:@"Original disc drive"],
+        sourceField,
+        [NSTextField labelWithString:@"Blank disc recorder"],
+        writerField
+    ], 6);
+    deviceAlert.accessoryView = fields;
+    [deviceAlert addButtonWithTitle:@"Continue"];
+    [deviceAlert addButtonWithTitle:@"Cancel"];
+    if ([deviceAlert runModal] != NSAlertFirstButtonReturn)
+        return;
+
+    const std::string source = sourceField.stringValue.UTF8String ?: "";
+    const std::string writer = writerField.stringValue.UTF8String ?: "";
+    if (source.empty() || writer.empty())
+    {
+        [self showMessage:@"Enter both the source CD drive and the blank-disc recorder."];
+        return;
+    }
+    if (source == writer)
+    {
+        [self showMessage:@"Disc copy requires separate source and recorder drives."];
+        return;
+    }
+    if (![self confirmBurn:@"Copy this CD to blank media?"])
+        return;
+
+    [self runCommands:{{cdrdao, "copy", "--source-device", source, "--device", writer,
+                       "--source-driver", "generic-mmc", "--driver", "generic-mmc", "--eject"}}
+               success:@"CD copy completed."
+          cleanupPath:""];
 }
 
 - (void)listDrives:(id)sender

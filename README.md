@@ -36,6 +36,11 @@ the bundled `cdrdao`. The package includes upstream source archives and license
 information for the bundled open-source components under
 `/usr/local/share/doc/disc-burner/`.
 
+Use **Copy CD…** to duplicate an audio or data CD directly from a source drive
+to a separate recorder with a blank CD-R/RW. The original and destination
+drives must be different; use **Scan CUE Recorder** to find `cdrdao` device
+identifiers. DVD and Blu-ray disc copying are not supported by this feature.
+
 Burning requires a compatible external or internal recorder and blank media.
 Blu-ray image creation uses UDF 1.50; DVD uses UDF 1.02 plus ISO/Joliet, and CD
 data discs use ISO/Joliet. The app asks for explicit confirmation before

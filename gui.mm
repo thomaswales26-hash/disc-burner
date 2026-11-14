@@ -233,6 +233,7 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
 - (void)createDmg:(id)sender;
 - (void)burnImage:(id)sender;
 - (void)copyDisc:(id)sender;
+- (void)copyDiscToDocuments:(id)sender;
 - (void)listDrives:(id)sender;
 - (void)showDriveStatus:(id)sender;
 - (void)ejectDisc:(id)sender;
@@ -281,15 +282,16 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
     NSButton* dmgButton = makeButton(@"Create Compressed DMG", self, @selector(createDmg:));
     NSButton* imageButton = makeButton(@"Burn Disc Image…", self, @selector(burnImage:));
     NSButton* copyButton = makeButton(@"Copy CD…", self, @selector(copyDisc:));
+    NSButton* saveCopyButton = makeButton(@"Copy CD to Documents…", self, @selector(copyDiscToDocuments:));
     _discType = [[NSPopUpButton alloc] init];
     [_discType addItemsWithTitles:@[@"Blu-ray", @"DVD", @"CD"]];
     _discType.toolTip = @"Data disc format";
     [dataButton setKeyEquivalent:@"\r"];
-    [_actionButtons addObjectsFromArray:@[dataButton, dmgButton, imageButton, copyButton]];
+    [_actionButtons addObjectsFromArray:@[dataButton, dmgButton, imageButton, copyButton, saveCopyButton]];
 
     NSTextField* discTypeLabel = [NSTextField labelWithString:@"Format:"];
     NSStackView* imageActions = horizontalStack(@[discTypeLabel, _discType, dataButton, dmgButton, imageButton], 10);
-    NSStackView* copyActions = horizontalStack(@[copyButton], 10);
+    NSStackView* copyActions = horizontalStack(@[copyButton, saveCopyButton], 10);
     NSStackView* mediaSection = verticalStack(@[
         [NSTextField labelWithString:@"Create and burn"],
         imageActions,
@@ -456,6 +458,9 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
     const BOOL copyingDisc = std::any_of(commands.begin(), commands.end(), [](const auto& command) {
         return command.size() > 1 && command[1] == "copy";
     });
+    const BOOL archivingDisc = std::any_of(commands.begin(), commands.end(), [](const auto& command) {
+        return command.size() > 1 && command[1] == "read-cd";
+    });
     for (NSButton* button in _actionButtons)
         button.enabled = NO;
     _progress.hidden = NO;
@@ -464,8 +469,9 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
     _activityBar.indeterminate = YES;
     _activityBar.doubleValue = 0;
     [_activityBar startAnimation:nil];
-    _statusLabel.stringValue = copyingDisc ? @"Copying CD…" : @"Working…";
-    [self appendLog:copyingDisc ? @"\nCopying CD…\n" : @"\nStarting operation…\n"];
+    _statusLabel.stringValue = copyingDisc ? @"Copying CD…" : (archivingDisc ? @"Copying CD to Documents…" : @"Working…");
+    [self appendLog:copyingDisc ? @"\nCopying CD to another disc…\n" :
+                    (archivingDisc ? @"\nCopying CD to Documents…\n" : @"\nStarting operation…\n")];
 
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         BOOL succeeded = YES;
@@ -502,13 +508,13 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
                     {
                         _activityBar.indeterminate = NO;
                         _activityBar.doubleValue = percentage;
-                        if (copyingDisc)
-                            _statusLabel.stringValue =
-                                [NSString stringWithFormat:@"Copying CD — %d%%", percentage];
+                        if (copyingDisc || archivingDisc)
+                            _statusLabel.stringValue = [NSString stringWithFormat:@"%@ — %d%%",
+                                archivingDisc ? @"Copying CD to Documents" : @"Copying CD", percentage];
                     }
-                    else if (copyingDisc && readingSource)
+                    else if ((copyingDisc || archivingDisc) && readingSource)
                     {
-                        _statusLabel.stringValue = @"Reading source CD…";
+                        _statusLabel.stringValue = archivingDisc ? @"Reading CD to Documents…" : @"Reading source CD…";
                     }
                     else if (copyingDisc && writingDisc)
                     {
@@ -688,6 +694,74 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
     [self runCommands:{{cdrdao, "copy", "--source-device", source, "--device", writer,
                        "--source-driver", "generic-mmc", "--driver", "generic-mmc", "--eject"}}
                success:@"CD copy completed."
+          cleanupPath:""];
+}
+
+- (void)copyDiscToDocuments:(id)sender
+{
+    (void)sender;
+    const std::string cdrdao = resolveTool("cdrdao");
+    if (cdrdao.empty())
+    {
+        [self showMessage:@"cdrdao is unavailable. Reinstall the app or add it to PATH."];
+        return;
+    }
+
+    std::string scanOutput;
+    const std::vector<DriveDevice> drives = discoverCdrdaoDrives(scanOutput);
+    if (drives.empty())
+    {
+        [self showMessage:driveDiscoveryFailure("No compatible CD drive was found.", scanOutput)];
+        return;
+    }
+
+    NSSavePanel* panel = [NSSavePanel savePanel];
+    panel.title = @"Save CD copy to Documents";
+    panel.nameFieldStringValue = @"Disc Copy.toc";
+    panel.directoryURL = [NSURL fileURLWithPath:
+        [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"] isDirectory:YES];
+    panel.canCreateDirectories = YES;
+    if ([panel runModal] != NSModalResponseOK)
+        return;
+
+    if (![panel.URL.path.pathExtension.lowercaseString isEqualToString:@"toc"])
+    {
+        [self showMessage:@"Save the CD copy with a .toc filename."];
+        return;
+    }
+
+    const fs::path toc(panel.URL.path.fileSystemRepresentation);
+    fs::path data = toc;
+    data.replace_extension(".bin");
+    if (fs::exists(toc) || fs::exists(data))
+    {
+        [self showMessage:@"A TOC or BIN file with that name already exists. Choose a new name."];
+        return;
+    }
+
+    NSAlert* deviceAlert = [[NSAlert alloc] init];
+    deviceAlert.messageText = @"Select the source CD drive";
+    deviceAlert.informativeText =
+        @"The CD will be copied into Documents as a .toc/.bin pair. Eject a mounted disc and try again if the drive is busy.";
+    NSPopUpButton* devicePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 0, 360, 28)];
+    for (const auto& drive : drives)
+    {
+        NSMenuItem* item = [[NSMenuItem alloc] initWithTitle:
+            [NSString stringWithUTF8String:drive.description.c_str()] action:nil keyEquivalent:@""];
+        item.representedObject = [NSString stringWithUTF8String:drive.identifier.c_str()];
+        [devicePopup.menu addItem:item];
+    }
+    deviceAlert.accessoryView = devicePopup;
+    [deviceAlert addButtonWithTitle:@"Copy CD"];
+    [deviceAlert addButtonWithTitle:@"Cancel"];
+    if ([deviceAlert runModal] != NSAlertFirstButtonReturn || devicePopup.selectedItem == nil)
+        return;
+
+    const std::string source = [(NSString*)devicePopup.selectedItem.representedObject UTF8String];
+    [self runCommands:{{cdrdao, "read-cd", "--device", source, "--driver", "generic-mmc", "--datafile",
+                       data.string(), toc.string()}}
+               success:[NSString stringWithFormat:@"CD copy saved to %@ and %@.",
+                                                  stringFromPath(toc), stringFromPath(data)]
           cleanupPath:""];
 }
 

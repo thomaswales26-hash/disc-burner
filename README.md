@@ -43,6 +43,11 @@ identifiers. The app streams copy output to the Activity log and displays a
 live progress bar (determinate when the drive reports a percentage). DVD and
 Blu-ray disc copying are not supported by this feature.
 
+Use **Copy CD to Documents…** to read an audio or data CD into a `.toc` and
+`.bin` pair, with the save dialog initially opened to Documents. Select the
+source drive and wait for the read to finish; the Activity panel shows output
+and progress when the drive reports it.
+
 Burning requires a compatible external or internal recorder and blank media.
 Blu-ray image creation uses UDF 1.50; DVD uses UDF 1.02 plus ISO/Joliet, and CD
 data discs use ISO/Joliet. The app asks for explicit confirmation before

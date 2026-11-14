@@ -325,6 +325,10 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
     _logView = [[NSTextView alloc] init];
     _logView.editable = NO;
     _logView.selectable = YES;
+    _logView.drawsBackground = YES;
+    _logView.backgroundColor = [NSColor colorWithCalibratedRed:0.10 green:0.11 blue:0.13 alpha:1.0];
+    _logView.textColor = NSColor.whiteColor;
+    _logView.insertionPointColor = NSColor.whiteColor;
     _logView.font = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular];
     _logView.textContainerInset = NSMakeSize(10, 10);
     _logView.frame = NSMakeRect(0, 0, 700, 220);
@@ -378,7 +382,12 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
 {
     if (text.length == 0)
         return;
-    [_logView.textStorage appendAttributedString:[[NSAttributedString alloc] initWithString:text]];
+    NSDictionary<NSAttributedStringKey, id>* attributes = @{
+        NSForegroundColorAttributeName: NSColor.whiteColor,
+        NSFontAttributeName: _logView.font
+    };
+    [_logView.textStorage appendAttributedString:[[NSAttributedString alloc] initWithString:text
+                                                                                 attributes:attributes]];
     [_logView scrollRangeToVisible:NSMakeRange(_logView.string.length, 0)];
 }
 

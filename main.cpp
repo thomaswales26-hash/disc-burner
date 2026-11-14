@@ -4,6 +4,9 @@
 #include <filesystem>
 #include <iostream>
 #include <string>
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
@@ -62,6 +65,37 @@ bool available(const std::string& executable)
         start = end + 1;
     }
     return false;
+}
+
+fs::path bundledTool(const std::string& name)
+{
+#if defined(__APPLE__)
+    std::vector<char> executablePath(4096);
+    uint32_t pathSize = static_cast<uint32_t>(executablePath.size());
+    if (_NSGetExecutablePath(executablePath.data(), &pathSize) == 0)
+    {
+        std::error_code error;
+        const fs::path executable = fs::canonical(executablePath.data(), error);
+        if (!error)
+        {
+            const fs::path bundled = executable.parent_path().parent_path() / "libexec" / "disc-burner" / name;
+            if (access(bundled.c_str(), X_OK) == 0)
+                return bundled;
+        }
+    }
+#endif
+    return {};
+}
+
+bool toolAvailable(const std::string& name)
+{
+    return !bundledTool(name).empty() || available(name);
+}
+
+std::string toolCommand(const std::string& name)
+{
+    const fs::path bundled = bundledTool(name);
+    return bundled.empty() ? name : bundled.string();
 }
 
 std::string prompt(const std::string& message)
@@ -171,10 +205,10 @@ void createDmg()
 
 void burnCue()
 {
-    if (!available("cue2toc") || !available("cdrdao"))
+    if (!toolAvailable("cue2toc") || !toolAvailable("cdrdao"))
     {
-        std::cerr << "CUE burning requires cue2toc and cdrdao on PATH.\n"
-                  << "Install them with Homebrew: brew install cdrdao\n";
+        std::cerr << "The bundled CUE-burning tools are unavailable. Reinstall the app or add "
+                     "cdrdao and cue2toc to PATH.\n";
         return;
     }
 
@@ -203,7 +237,7 @@ void burnCue()
     close(tempFile);
 
     const fs::path toc = tempName.data();
-    const int convertStatus = run({"cue2toc", "-o", toc.string(), cue.string()});
+    const int convertStatus = run({toolCommand("cue2toc"), "-o", toc.string(), cue.string()});
     if (convertStatus != 0 || !fs::is_regular_file(toc))
     {
         fs::remove(toc);
@@ -219,8 +253,8 @@ void burnCue()
         return;
     }
 
-    const int burnStatus = run({"cdrdao", "write", "--device", device, "--driver", "generic-mmc", "--eject",
-                                toc.string()});
+    const int burnStatus = run({toolCommand("cdrdao"), "write", "--device", device, "--driver", "generic-mmc",
+                                "--eject", toc.string()});
     fs::remove(toc);
     if (burnStatus != 0)
         std::cerr << "CUE disc burning failed. Check the drive, media, and cdrdao device value.\n";
@@ -236,6 +270,7 @@ void showMenu()
               << "5) List optical drives\n"
               << "6) Show drive/media status\n"
               << "7) Eject disc\n"
+              << "8) Scan for CUE-burning recorder devices\n"
               << "0) Quit\n";
 }
 
@@ -277,6 +312,8 @@ int main()
         }
         else if (choice == "7")
             run({"drutil", "tray", "eject"});
+        else if (choice == "8")
+            run({toolCommand("cdrdao"), "scanbus"});
         else if (!choice.empty())
             std::cout << "Unknown option.\n";
     }

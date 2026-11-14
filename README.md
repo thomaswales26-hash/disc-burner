@@ -39,7 +39,9 @@ was not detected; use the corresponding `IOService:` path reported by
 Use **Copy CD…** to duplicate an audio or data CD directly from a source drive
 to a separate recorder with a blank CD-R/RW. The original and destination
 drives must be different; use **Scan CD Recorder** to find `cdrdao` device
-identifiers. DVD and Blu-ray disc copying are not supported by this feature.
+identifiers. The app streams copy output to the Activity log and displays a
+live progress bar (determinate when the drive reports a percentage). DVD and
+Blu-ray disc copying are not supported by this feature.
 
 Burning requires a compatible external or internal recorder and blank media.
 Blu-ray image creation uses UDF 1.50; DVD uses UDF 1.02 plus ISO/Joliet, and CD

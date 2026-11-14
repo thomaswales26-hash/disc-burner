@@ -2,8 +2,11 @@
 #import <mach-o/dyld.h>
 
 #include <cerrno>
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -75,7 +78,31 @@ struct DriveDevice
     std::string description;
 };
 
-CommandResult execute(const std::vector<std::string>& arguments)
+int percentageIn(const std::string& text)
+{
+    const auto marker = text.find('%');
+    if (marker == std::string::npos)
+        return -1;
+
+    std::size_t start = marker;
+    while (start > 0 && text[start - 1] >= '0' && text[start - 1] <= '9')
+        --start;
+    if (start == marker)
+        return -1;
+
+    try
+    {
+        const int value = std::stoi(text.substr(start, marker - start));
+        return value >= 0 && value <= 100 ? value : -1;
+    }
+    catch (const std::exception&)
+    {
+        return -1;
+    }
+}
+
+CommandResult execute(const std::vector<std::string>& arguments,
+                      const std::function<void(const std::string&)>& onOutput = {})
 {
     if (arguments.empty())
         return {1, "No command was provided.\n"};
@@ -104,7 +131,20 @@ CommandResult execute(const std::vector<std::string>& arguments)
             return {1, "Could not start " + arguments.front() + ": " + reason + "\n"};
         }
 
-        NSData* data = [[pipe fileHandleForReading] readDataToEndOfFile];
+        NSMutableData* data = [NSMutableData data];
+        NSFileHandle* reader = pipe.fileHandleForReading;
+        while (true)
+        {
+            NSData* chunk = [reader readDataOfLength:4096];
+            if (chunk.length == 0)
+                break;
+            [data appendData:chunk];
+            if (onOutput)
+            {
+                const std::string text(static_cast<const char*>(chunk.bytes), chunk.length);
+                onOutput(text);
+            }
+        }
         [task waitUntilExit];
         NSString* output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
         std::string text = output.UTF8String ? output.UTF8String : "(command output was not UTF-8)\n";
@@ -184,6 +224,7 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
     NSTextView* _logView;
     NSTextField* _statusLabel;
     NSProgressIndicator* _progress;
+    NSProgressIndicator* _activityBar;
     NSPopUpButton* _discType;
     NSMutableArray<NSButton*>* _actionButtons;
     BOOL _operationRunning;
@@ -271,6 +312,13 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
     _progress.controlSize = NSControlSizeSmall;
     _progress.hidden = YES;
     NSStackView* statusRow = horizontalStack(@[_progress, _statusLabel], 8);
+    _activityBar = [[NSProgressIndicator alloc] init];
+    _activityBar.style = NSProgressIndicatorStyleBar;
+    _activityBar.minValue = 0;
+    _activityBar.maxValue = 100;
+    _activityBar.indeterminate = YES;
+    _activityBar.hidden = YES;
+    [_activityBar.heightAnchor constraintEqualToConstant:12].active = YES;
 
     NSTextField* logHeading = [NSTextField labelWithString:@"Activity"];
     logHeading.font = [NSFont systemFontOfSize:14 weight:NSFontWeightSemibold];
@@ -294,6 +342,7 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
         mediaSection,
         driveSection,
         statusRow,
+        _activityBar,
         logHeading,
         logScroll,
         spacer
@@ -395,27 +444,69 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
     if (_operationRunning)
         return;
     _operationRunning = YES;
+    const BOOL copyingDisc = std::any_of(commands.begin(), commands.end(), [](const auto& command) {
+        return command.size() > 1 && command[1] == "copy";
+    });
     for (NSButton* button in _actionButtons)
         button.enabled = NO;
     _progress.hidden = NO;
     [_progress startAnimation:nil];
-    _statusLabel.stringValue = @"Working…";
-    [self appendLog:@"\nStarting operation…\n"];
+    _activityBar.hidden = NO;
+    _activityBar.indeterminate = YES;
+    _activityBar.doubleValue = 0;
+    [_activityBar startAnimation:nil];
+    _statusLabel.stringValue = copyingDisc ? @"Copying CD…" : @"Working…";
+    [self appendLog:copyingDisc ? @"\nCopying CD…\n" : @"\nStarting operation…\n"];
 
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         BOOL succeeded = YES;
         NSMutableString* output = [NSMutableString string];
         for (const auto& command : commands)
         {
-            [output appendFormat:@">"];
+            NSMutableString* commandHeader = [NSMutableString stringWithString:@">"];
             for (const auto& argument : command)
             {
-                [output appendFormat:@" %s", argument.c_str()];
+                [commandHeader appendFormat:@" %s", argument.c_str()];
             }
-            [output appendString:@"\n"];
-            const CommandResult result = execute(command);
-            if (!result.output.empty())
-                [output appendString:[NSString stringWithUTF8String:result.output.c_str()]];
+            [commandHeader appendString:@"\n"];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self appendLog:commandHeader];
+            });
+            const CommandResult result = execute(command, [&](const std::string& chunk) {
+                const int percentage = percentageIn(chunk);
+                std::string lowercase = chunk;
+                std::transform(lowercase.begin(), lowercase.end(), lowercase.begin(),
+                               [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+                const BOOL readingSource = lowercase.find("read") != std::string::npos;
+                const BOOL writingDisc = lowercase.find("writ") != std::string::npos ||
+                                         lowercase.find("burn") != std::string::npos;
+                std::string displayText = chunk;
+                std::replace(displayText.begin(), displayText.end(), '\r', '\n');
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    NSString* text = [[NSString alloc] initWithBytes:displayText.data()
+                                                             length:displayText.size()
+                                                           encoding:NSUTF8StringEncoding];
+                    if (text == nil)
+                        text = @"(command output was not UTF-8)\n";
+                    [self appendLog:text];
+                    if (percentage >= 0)
+                    {
+                        _activityBar.indeterminate = NO;
+                        _activityBar.doubleValue = percentage;
+                        if (copyingDisc)
+                            _statusLabel.stringValue =
+                                [NSString stringWithFormat:@"Copying CD — %d%%", percentage];
+                    }
+                    else if (copyingDisc && readingSource)
+                    {
+                        _statusLabel.stringValue = @"Reading source CD…";
+                    }
+                    else if (copyingDisc && writingDisc)
+                    {
+                        _statusLabel.stringValue = @"Writing destination CD…";
+                    }
+                });
+            });
             if (result.status != 0)
             {
                 succeeded = NO;
@@ -438,14 +529,18 @@ NSStackView* horizontalStack(NSArray<NSView*>* views, CGFloat spacing)
             {
                 [self appendLog:[success stringByAppendingString:@"\n"]];
                 _statusLabel.stringValue = @"Completed";
+                _activityBar.indeterminate = NO;
+                _activityBar.doubleValue = 100;
             }
             else
             {
                 _statusLabel.stringValue = @"Operation failed";
+                _activityBar.hidden = YES;
             }
             _operationRunning = NO;
             _progress.hidden = YES;
             [_progress stopAnimation:nil];
+            [_activityBar stopAnimation:nil];
             for (NSButton* button in _actionButtons)
                 button.enabled = YES;
         });

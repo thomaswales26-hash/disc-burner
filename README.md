@@ -4,6 +4,10 @@ A macOS application for mastering and burning data Blu-ray, DVD, and CD discs,
 creating compressed DMG files from folders, burning existing disc images, and
 copying CDs between drives.
 
+The macOS build also includes **Happy Hardcore Radio**, a live stream player
+with an integrated FFmpeg recorder. It accepts HTTP(S) radio stream URLs and
+saves recordings as AAC audio in an `.m4a` file.
+
 ## Build and run
 
 Open the project in CLion, or build from the project directory:
@@ -14,6 +18,13 @@ cmake --build build
 open "build/Disc Burner.app"
 ```
 
+Open `build/Happy Hardcore Radio.app` to play or record a stream. When FFmpeg
+is installed with Homebrew, CMake bundles it and its Homebrew runtime libraries
+into the app. Install it with `brew install ffmpeg` before building to enable
+recording without a separate runtime dependency. The player uses AVFoundation
+and does not require FFmpeg for playback; if FFmpeg was unavailable during the
+build, it can still be found on `PATH` when recording.
+
 The build also includes the command-line version at `build/disc-burner`.
 
 The app uses macOS `hdiutil` to create and burn disc images and `drutil` for
@@ -22,14 +33,16 @@ to package a folder as a read-only, compressed `.dmg` file. CD copying and
 device scanning use `cdrdao`; install it for local builds with Homebrew:
 
 ```sh
-brew install cdrdao
+brew install cdrdao ffmpeg
 ```
 
-The installer package includes `cdrdao` and its runtime libraries. A CMake
-build can also find `cdrdao` on `PATH` as a development fallback. Use **Scan CD
-Recorder** to find recorder devices. The package includes upstream source
-archives and license information for bundled open-source components under
-`/usr/local/share/doc/disc-burner/`.
+The installer package includes `cdrdao` and its runtime libraries, plus FFmpeg
+and its runtime libraries in Happy Hardcore Radio. FFmpeg license files are
+included in the radio app's `Contents/Resources/FFmpeg-Licenses` directory. A
+CMake build can also find `cdrdao` on `PATH` as a development fallback. Use
+**Scan CD Recorder** to find recorder devices. The package includes upstream
+source archives and license information for bundled open-source components
+under `/usr/local/share/doc/disc-burner/`.
 
 The drive listing shows both macOS `drutil` information and `cdrdao` device
 paths. A `SupportLevel: Unsupported` line from `drutil` does not mean the drive
@@ -62,6 +75,6 @@ brew install cdrdao
 bash scripts/build-package.sh
 ```
 
-The installer, including `Disc Burner.app`, is written to `dist/`. The app and
-bundled recorder tool are built for Apple Silicon; macOS system disc utilities
-are used for other disc operations.
+The installer, including `Disc Burner.app` and `Happy Hardcore Radio.app`, is
+written to `dist/`. Both apps and the bundled recorder tools are built for
+Apple Silicon; macOS system disc utilities are used for other disc operations.

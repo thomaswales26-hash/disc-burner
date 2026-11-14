@@ -2,19 +2,22 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="${1:-1.5.0}"
+VERSION="${1:-1.6.0}"
 STAGE="$ROOT/package-root"
 PACKAGE="$ROOT/dist/Disc-Burner-$VERSION.pkg"
+DISK_IMAGE="$ROOT/dist/Disc-Burner-$VERSION.dmg"
+DISK_IMAGE_STAGE="$ROOT/build-package/dmg-stage-$VERSION"
 PREFIX="$(brew --prefix)"
 LIBEXEC="$STAGE/usr/local/libexec/disc-burner"
 LIBRARIES="$LIBEXEC/lib"
 DOCS="$STAGE/usr/local/share/doc/disc-burner"
 SOURCES="$DOCS/third-party-source"
 APP="$STAGE/Applications/Disc Burner.app"
+RADIO_APP="$STAGE/Applications/Happy Hardcore Radio.app"
 
-for tool in cdrdao; do
+for tool in cdrdao ffmpeg; do
     if [[ ! -x "$PREFIX/bin/$tool" ]]; then
-        echo "Missing $tool. Install cdrdao with Homebrew before packaging." >&2
+        echo "Missing $tool. Install it with Homebrew before packaging." >&2
         exit 1
     fi
 done
@@ -22,12 +25,14 @@ done
 mkdir -p "$STAGE/usr/local/bin" "$LIBEXEC" "$LIBRARIES" "$SOURCES" "$ROOT/dist"
 chmod -R u+w "$STAGE"
 rm -f "$LIBEXEC/cue2toc" "$APP/Contents/Resources/libexec/disc-burner/cue2toc"
-cmake -S "$ROOT" -B "$ROOT/build-package" -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
-cmake --build "$ROOT/build-package" --parallel 2
+cmake -S "$ROOT" -B "$ROOT/build-package" -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_OSX_ARCHITECTURES=arm64 -DFFMPEG_EXECUTABLE="$PREFIX/bin/ffmpeg"
+cmake --build "$ROOT/build-package" --clean-first --parallel 2
 cp "$ROOT/build-package/disc-burner" "$STAGE/usr/local/bin/disc-burner"
 mkdir -p "$STAGE/Applications"
 ditto "$ROOT/build-package/Disc Burner.app" "$APP"
 cp -L "$PREFIX/bin/cdrdao" "$LIBEXEC/"
+ditto "$ROOT/build-package/Happy Hardcore Radio.app" "$RADIO_APP"
 cp "$ROOT/README.md" "$DOCS/README.md"
 python3 "$ROOT/scripts/relocate-cdrdao.py" "$LIBEXEC" "$LIBRARIES"
 mkdir -p "$APP/Contents/Resources/libexec"
@@ -86,3 +91,9 @@ xattr -cr "$STAGE"
 pkgbuild --root "$STAGE" --identifier com.thomaswales26.disc-burner \
     --version "$VERSION" --install-location / "$PACKAGE"
 echo "Created $PACKAGE"
+
+mkdir -p "$DISK_IMAGE_STAGE"
+ditto "$PACKAGE" "$DISK_IMAGE_STAGE/$(basename "$PACKAGE")"
+hdiutil create -ov -format UDZO -volname "Disc Burner $VERSION" \
+    -srcfolder "$DISK_IMAGE_STAGE" "$DISK_IMAGE"
+echo "Created $DISK_IMAGE"
